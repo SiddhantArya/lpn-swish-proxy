@@ -25,8 +25,25 @@ local_swish(Port) :-
 :- debug(lpn(convert)).
 :- debug(lpn(_)).
 
+%%	convert_lpn(+In:Stream, +Out:stream) is det
+%
+% SWISHize In as it's copied to Out
+%
 convert_lpn(In, Out) :-
+	% the \+ \+ enforces determinacy
 	\+ \+ convert_lpn2(In, Out).
+
+%%	convert_lpn2(+In:Stream, +Out:stream) is nondet
+%
+% SWISHize In as it's copied to Out
+%
+% Method used is to read in via load_html, which creates
+% a tree structure DOM, convert parts of the DOM that
+% are to be SWISHized - @see convert_dom/2 and convert/2
+%
+
+
+
 
 convert_lpn2(In, Out) :-
 	load_html(In, DOM,
@@ -42,6 +59,54 @@ convert_lpn2(In, Out) :-
 		html_write(Stream, DOM1, []),
 		close(Stream))
 	).
+
+
+%%       list_to_strings(+List:List, +Output: String) is det
+%
+%        This method takes in LPN Prolog code as List as an
+%        input aragument and converts it into a String
+
+list_to_strings(List, Output):-
+	list_to_strings(List, "", Output).
+
+
+
+list_to_strings([H | T], In, Out) :-
+	string_concat(H, '.', NewString),
+	(
+	    % This is a corner case to detect an empty string
+	    NewString \= "."
+	->  string_concat(In, NewString, Final_String),
+	    list_to_strings(T, Final_String, Out)
+	;   list_to_strings(T, In, Out)
+	).
+
+list_to_strings([], In, Out) :-
+	Out = In.
+
+%%	sort_lpn_codes(+Input: String, Output:String) is det
+%	This method takes in LPN code as an input argument
+%	and returns an Output String which is sorted.
+%	This has been done to fix SWISH errors like:
+%	Clauses of <wizard>/1 are not together in the source-file
+%
+%
+
+
+sort_lpn_codes(Input, Output) :-
+	% Fix for the corner case where the first predicate
+	% in the source code is missing a new line character
+	string_concat('\n', Input, InputString),
+	split_string(InputString, '.', '', SplitList),
+	sort(SplitList, NewList),
+	list_to_strings(NewList, Output).
+
+%%	convert_dom(+DOM0, -DOM) is semidet
+%
+%	convert a DOM or sub-DOM
+%	if convert/2 can convert it, then it's a
+%	structure to be modified. If not, we recursively
+%	try to convert
 
 convert_dom(DOM0, DOM) :-
 	convert(DOM0, DOM), !.
@@ -62,6 +127,8 @@ convert_dom(element(E,A,C0), element(E,A,C)) :-
 %	  - Extend the head with our dependencies
 %	  - Extend the body to call the `swish` jQuery plugin
 %	  - Classify sources in `fancyvrb` environments (verbatim)
+%
+%	  'fancyvrb' is a class in the original sources
 
 convert(element(head, Args, C0),
 	element(head, Args,
@@ -127,9 +194,10 @@ convert(element(div, Attrs0, C0),
 	dom_add_class(Attrs0, 'swish exercise', Attrs).
 convert(element(div, Attrs0, C0), Source) :-
 	select(class=fancyvrb, Attrs0, Attrs),
-	(   convert_source(C0, String)
+	(   convert_source(C0, String),
+	    sort_lpn_codes(String, String1)
 	->  put_attr(Source, 'LPN',
-		     verb{text:String,
+		     verb{text:String1,
 			  attributes:Attrs,
 			  element:Source})
 	;   debug(lpn(convert), 'Failed to convert ~p', [C0]),
@@ -215,7 +283,6 @@ leading_spaces(_, N, N).
 %	  - Indentify queries
 %	    - Query needs only built-ins
 %	    - Query needs sources S1, S2, ...
-
 classify_sources(DOM) :-
 	term_attvars(DOM, Vars),
 	pre_classify_verbs(Vars),
@@ -463,6 +530,9 @@ head_pi(Head, Name/Arity) :-
 %
 %	Find source dependencies.  A source depends on another if it
 %	requires predicates that are provided by another.
+%
+%	note: I suspect Jan never got this working - Annie
+%
 
 id_depends(Vars) :-
 	include(has_class(source), Vars, Sources),
